@@ -490,7 +490,7 @@
 
   #if ENABLED(DELTA_AUTO_CALIBRATION) || ENABLED(DELTA_CALIBRATION_MENU)
     // Set the radius for the calibration probe points - max DELTA_PRINTABLE_RADIUS*0.869 for non-eccentric probes
-    #define DELTA_CALIBRATION_RADIUS DELTA_PRINTABLE_RADIUS*0.869 // mm
+    #define DELTA_CALIBRATION_RADIUS DELTA_PRINTABLE_RADIUS*0.8 // mm
     // Set the steprate for papertest probing
     #define PROBE_MANUALLY_STEP 0.025
   #endif
