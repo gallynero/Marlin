@@ -51,6 +51,13 @@ extern uint8_t commands_in_queue, // Count of commands in the queue
 
 extern char command_queue[BUFSIZE][MAX_CMD_SIZE];
 
+/*
+ * The port that the command was received on
+ */
+#if NUM_SERIAL > 1
+  extern int16_t command_queue_port[BUFSIZE];
+#endif
+
 /**
  * Initialization of queue for setup()
  */
@@ -88,7 +95,23 @@ void enqueue_and_echo_commands_P(const char * const pgcode);
 /**
  * Enqueue with Serial Echo
  */
-bool enqueue_and_echo_command(const char* cmd, bool say_ok=false);
+bool enqueue_and_echo_command(const char* cmd);
+
+#define HAS_LCD_QUEUE_NOW (ENABLED(MALYAN_LCD) || (ENABLED(ULTIPANEL) && (ENABLED(AUTO_BED_LEVELING_UBL) || ENABLED(PID_AUTOTUNE_MENU) || ENABLED(ADVANCED_PAUSE_FEATURE))))
+#define HAS_QUEUE_NOW (ENABLED(SDSUPPORT) || HAS_LCD_QUEUE_NOW)
+
+#if HAS_QUEUE_NOW
+  /**
+   * Enqueue and return only when commands are actually enqueued
+   */
+  void enqueue_and_echo_command_now(const char* cmd);
+  #if HAS_LCD_QUEUE_NOW
+    /**
+     * Enqueue from program memory and return only when commands are actually enqueued
+     */
+    void enqueue_and_echo_commands_now_P(const char * const cmd);
+  #endif
+#endif
 
 /**
  * Add to the circular command queue the next command from:

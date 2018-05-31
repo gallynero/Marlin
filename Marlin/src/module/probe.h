@@ -29,20 +29,30 @@
 
 #include "../inc/MarlinConfig.h"
 
-bool set_probe_deployed(const bool deploy);
-float probe_pt(const float &lx, const float &ly, const bool, const uint8_t, const bool printable=true);
-
 #if HAS_BED_PROBE
   extern float zprobe_zoffset;
-  void refresh_zprobe_zoffset(const bool no_babystep=false);
+  bool set_probe_deployed(const bool deploy);
+  #ifdef Z_AFTER_PROBING
+    void move_z_after_probing();
+  #endif
+  enum ProbePtRaise : unsigned char {
+    PROBE_PT_NONE,  // No raise or stow after run_z_probe
+    PROBE_PT_STOW,  // Do a complete stow after run_z_probe
+    PROBE_PT_RAISE, // Raise to "between" clearance after run_z_probe
+    PROBE_PT_BIG_RAISE  // Raise to big clearance after run_z_probe
+  };
+  float probe_pt(const float &rx, const float &ry, const ProbePtRaise raise_after=PROBE_PT_NONE, const uint8_t verbose_level=0, const bool probe_relative=true);
   #define DEPLOY_PROBE() set_probe_deployed(true)
   #define STOW_PROBE() set_probe_deployed(false)
+  #if HAS_HEATED_BED && ENABLED(WAIT_FOR_BED_HEATER)
+    extern const char msg_wait_for_bed_heating[25];
+  #endif
 #else
   #define DEPLOY_PROBE()
   #define STOW_PROBE()
 #endif
 
-#if HAS_Z_SERVO_ENDSTOP
+#if HAS_Z_SERVO_PROBE
   extern const int z_servo_angle[2];
   void servo_probe_init();
 #endif

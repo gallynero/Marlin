@@ -32,6 +32,8 @@
   #include "../../module/configuration_store.h"
 #endif
 
+//#define M420_C_USE_MEAN
+
 /**
  * M420: Enable/Disable Bed Leveling and/or set the Z fade height.
  *
@@ -42,16 +44,31 @@
  * With AUTO_BED_LEVELING_UBL only:
  *
  *   L[index]  Load UBL mesh from index (0 is default)
+ *   T[map]    0:Human-readable 1:CSV 2:"LCD" 4:Compact
+ *
+ * With mesh-based leveling only:
+ *
+ *   C         Center mesh on the mean of the lowest and highest
  */
 void GcodeSuite::M420() {
+  const bool seen_S = parser.seen('S');
+  bool to_enable = seen_S ? parser.value_bool() : planner.leveling_active;
+
+  // If disabling leveling do it right away
+  // (Don't disable for just M420 or M420 V)
+  if (seen_S && !to_enable) set_bed_leveling_enabled(false);
+
+  const float oldpos[] = { current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS] };
 
   #if ENABLED(AUTO_BED_LEVELING_UBL)
 
     // L to load a mesh from the EEPROM
     if (parser.seen('L')) {
 
+      set_bed_leveling_enabled(false);
+
       #if ENABLED(EEPROM_SETTINGS)
-        const int8_t storage_slot = parser.has_value() ? parser.value_int() : ubl.state.storage_slot;
+        const int8_t storage_slot = parser.has_value() ? parser.value_int() : ubl.storage_slot;
         const int16_t a = settings.calc_num_meshes();
 
         if (!a) {
@@ -66,7 +83,7 @@ void GcodeSuite::M420() {
         }
 
         settings.load_mesh(storage_slot);
-        ubl.state.storage_slot = storage_slot;
+        ubl.storage_slot = storage_slot;
 
       #else
 
@@ -78,12 +95,72 @@ void GcodeSuite::M420() {
 
     // L or V display the map info
     if (parser.seen('L') || parser.seen('V')) {
-      ubl.display_map(0);  // Currently only supports one map type
-      SERIAL_ECHOLNPAIR("ubl.mesh_is_valid = ", ubl.mesh_is_valid());
-      SERIAL_ECHOLNPAIR("ubl.state.storage_slot = ", ubl.state.storage_slot);
+      ubl.display_map(parser.byteval('T'));
+      SERIAL_ECHOPGM("Mesh is ");
+      if (!ubl.mesh_is_valid()) SERIAL_ECHOPGM("in");
+      SERIAL_ECHOLNPAIR("valid\nStorage slot: ", ubl.storage_slot);
     }
 
   #endif // AUTO_BED_LEVELING_UBL
+
+  #if HAS_MESH
+
+    #if ENABLED(MESH_BED_LEVELING)
+      #define Z_VALUES(X,Y) mbl.z_values[X][Y]
+    #else
+      #define Z_VALUES(X,Y) z_values[X][Y]
+    #endif
+
+    // Subtract the given value or the mean from all mesh values
+    if (leveling_is_valid() && parser.seen('C')) {
+      const float cval = parser.value_float();
+      #if ENABLED(AUTO_BED_LEVELING_UBL)
+
+        set_bed_leveling_enabled(false);
+        ubl.adjust_mesh_to_mean(true, cval);
+
+      #else
+
+        #if ENABLED(M420_C_USE_MEAN)
+
+          // Get the sum and average of all mesh values
+          float mesh_sum = 0;
+          for (uint8_t x = GRID_MAX_POINTS_X; x--;)
+            for (uint8_t y = GRID_MAX_POINTS_Y; y--;)
+              mesh_sum += Z_VALUES(x, y);
+          const float zmean = mesh_sum / float(GRID_MAX_POINTS);
+
+        #else
+
+          // Find the low and high mesh values
+          float lo_val = 100, hi_val = -100;
+          for (uint8_t x = GRID_MAX_POINTS_X; x--;)
+            for (uint8_t y = GRID_MAX_POINTS_Y; y--;) {
+              const float z = Z_VALUES(x, y);
+              NOMORE(lo_val, z);
+              NOLESS(hi_val, z);
+            }
+          // Take the mean of the lowest and highest
+          const float zmean = (lo_val + hi_val) / 2.0 + cval;
+
+        #endif
+
+        // If not very close to 0, adjust the mesh
+        if (!NEAR_ZERO(zmean)) {
+          set_bed_leveling_enabled(false);
+          // Subtract the mean from all values
+          for (uint8_t x = GRID_MAX_POINTS_X; x--;)
+            for (uint8_t y = GRID_MAX_POINTS_Y; y--;)
+              Z_VALUES(x, y) -= zmean;
+          #if ENABLED(ABL_BILINEAR_SUBDIVISION)
+            bed_level_virt_interpolate();
+          #endif
+        }
+
+      #endif
+    }
+
+  #endif // HAS_MESH
 
   // V to print the matrix or mesh
   if (parser.seen('V')) {
@@ -98,29 +175,27 @@ void GcodeSuite::M420() {
           #endif
         #elif ENABLED(MESH_BED_LEVELING)
           SERIAL_ECHOLNPGM("Mesh Bed Level data:");
-          mbl_mesh_report();
+          mbl.report_mesh();
         #endif
       }
     #endif
   }
 
-  const bool to_enable = parser.boolval('S');
-  if (parser.seen('S'))
-    set_bed_leveling_enabled(to_enable);
-
   #if ENABLED(ENABLE_LEVELING_FADE_HEIGHT)
-    if (parser.seen('Z')) set_z_fade_height(parser.value_linear_units());
+    if (parser.seen('Z')) set_z_fade_height(parser.value_linear_units(), false);
   #endif
 
-  const bool new_status = leveling_is_active();
+  // Enable leveling if specified, or if previously active
+  set_bed_leveling_enabled(to_enable);
 
-  if (to_enable && !new_status) {
+  // Error if leveling failed to enable or reenable
+  if (to_enable && !planner.leveling_active) {
     SERIAL_ERROR_START();
     SERIAL_ERRORLNPGM(MSG_ERR_M420_FAILED);
   }
 
   SERIAL_ECHO_START();
-  SERIAL_ECHOLNPAIR("Bed Leveling ", new_status ? MSG_ON : MSG_OFF);
+  SERIAL_ECHOLNPAIR("Bed Leveling ", planner.leveling_active ? MSG_ON : MSG_OFF);
 
   #if ENABLED(ENABLE_LEVELING_FADE_HEIGHT)
     SERIAL_ECHO_START();
@@ -130,6 +205,10 @@ void GcodeSuite::M420() {
     else
       SERIAL_ECHOLNPGM(MSG_OFF);
   #endif
+
+  // Report change in position
+  if (memcmp(oldpos, current_position, sizeof(oldpos)))
+    report_current_position();
 }
 
 #endif // HAS_LEVELING

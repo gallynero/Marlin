@@ -25,7 +25,7 @@
  *
  * This firmware is a mashup between Sprinter and grbl.
  *  - https://github.com/kliment/Sprinter
- *  - https://github.com/simen/grbl
+ *  - https://github.com/grbl/grbl
  */
 
 #include "Marlin.h"
@@ -75,7 +75,7 @@
 #endif
 
 #if HAS_SERVOS
-  #include "HAL/servo.h"
+  #include "module/servo.h"
 #endif
 
 #if HAS_DIGIPOTSS
@@ -95,12 +95,8 @@
   #include "feature/I2CPositionEncoder.h"
 #endif
 
-#if ENABLED(ENDSTOP_INTERRUPTS_FEATURE)
-  #include "HAL/HAL_endstop_interrupts.h"
-#endif
-
-#if ENABLED(HAVE_TMC2130)
-  #include "feature/tmc2130.h"
+#if HAS_TRINAMIC
+  #include "feature/tmc_util.h"
 #endif
 
 #if ENABLED(SDSUPPORT)
@@ -126,6 +122,10 @@
   #include "feature/pause.h"
 #endif
 
+#if ENABLED(POWER_LOSS_RECOVERY)
+  #include "feature/power_loss_recovery.h"
+#endif
+
 #if ENABLED(FILAMENT_RUNOUT_SENSOR)
   #include "feature/runout.h"
 #endif
@@ -138,7 +138,11 @@
   #include "feature/caselight.h"
 #endif
 
-#if (ENABLED(SWITCHING_EXTRUDER) && !DONT_SWITCH) || ENABLED(SWITCHING_NOZZLE) || ENABLED(PARKING_EXTRUDER)
+#if HAS_FANMUX
+  #include "feature/fanmux.h"
+#endif
+
+#if DO_SWITCH_EXTRUDER || ENABLED(SWITCHING_NOZZLE) || ENABLED(PARKING_EXTRUDER)
   #include "module/tool_change.h"
 #endif
 
@@ -165,8 +169,12 @@ bool axis_homed[XYZ] = { false }, axis_known_position[XYZ] = { false };
 
 #if FAN_COUNT > 0
   int16_t fanSpeeds[FAN_COUNT] = { 0 };
+  #if ENABLED(EXTRA_FAN_SPEED)
+    int16_t old_fanSpeeds[FAN_COUNT],
+            new_fanSpeeds[FAN_COUNT];
+  #endif
   #if ENABLED(PROBING_FANS_OFF)
-    bool fans_paused = false;
+    bool fans_paused; // = false;
     int16_t paused_fanSpeeds[FAN_COUNT] = { 0 };
   #endif
 #endif
@@ -176,30 +184,24 @@ volatile bool wait_for_heatup = true;
 
 // For M0/M1, this flag may be cleared (by M108) to exit the wait-for-user loop
 #if HAS_RESUME_CONTINUE
-  volatile bool wait_for_user = false;
+  volatile bool wait_for_user; // = false;
+#endif
+
+#if HAS_AUTO_REPORTING || ENABLED(HOST_KEEPALIVE_FEATURE)
+  bool suspend_auto_report; // = false
 #endif
 
 // Inactivity shutdown
-millis_t max_inactive_time = 0,
+millis_t max_inactive_time, // = 0
          stepper_inactive_time = (DEFAULT_STEPPER_DEACTIVE_TIME) * 1000UL;
 
-#if ENABLED(ADVANCED_PAUSE_FEATURE)
-  AdvancedPauseMenuResponse advanced_pause_menu_response;
-#endif
-
 #ifdef CHDK
-  millis_t chdkHigh = 0;
-  bool chdkActive = false;
-#endif
-
-#if ENABLED(PID_EXTRUSION_SCALING)
-  int lpq_len = 20;
+  millis_t chdkHigh; // = 0;
+  bool chdkActive; // = false;
 #endif
 
 #if ENABLED(I2C_POSITION_ENCODERS)
   I2CPositionEncodersMgr I2CPEM;
-  uint8_t blockBufferIndexRef = 0;
-  millis_t lastUpdateMillis;
 #endif
 
 /**
@@ -214,59 +216,18 @@ void setup_killpin() {
   #endif
 }
 
-#if ENABLED(FILAMENT_RUNOUT_SENSOR)
-
-  void setup_filrunoutpin() {
-    #if ENABLED(ENDSTOPPULLUP_FIL_RUNOUT)
-      SET_INPUT_PULLUP(FIL_RUNOUT_PIN);
-    #else
-      SET_INPUT(FIL_RUNOUT_PIN);
-    #endif
-  }
-
-#endif
-
 void setup_powerhold() {
   #if HAS_SUICIDE
     OUT_WRITE(SUICIDE_PIN, HIGH);
   #endif
   #if HAS_POWER_SWITCH
     #if ENABLED(PS_DEFAULT_OFF)
-      OUT_WRITE(PS_ON_PIN, PS_ON_ASLEEP);
+      PSU_OFF();
     #else
-      OUT_WRITE(PS_ON_PIN, PS_ON_AWAKE);
+      PSU_ON();
     #endif
   #endif
 }
-
-#if HAS_SERVOS
-
-  HAL_SERVO_LIB servo[NUM_SERVOS];
-
-  void servo_init() {
-    #if NUM_SERVOS >= 1 && HAS_SERVO_0
-      servo[0].attach(SERVO0_PIN);
-      servo[0].detach(); // Just set up the pin. We don't have a position yet. Don't move to a random position.
-    #endif
-    #if NUM_SERVOS >= 2 && HAS_SERVO_1
-      servo[1].attach(SERVO1_PIN);
-      servo[1].detach();
-    #endif
-    #if NUM_SERVOS >= 3 && HAS_SERVO_2
-      servo[2].attach(SERVO2_PIN);
-      servo[2].detach();
-    #endif
-    #if NUM_SERVOS >= 4 && HAS_SERVO_3
-      servo[3].attach(SERVO3_PIN);
-      servo[3].detach();
-    #endif
-
-    #if HAS_Z_SERVO_ENDSTOP
-      servo_probe_init();
-    #endif
-  }
-
-#endif // HAS_SERVOS
 
 /**
  * Stepper Reset (RigidBoard, et.al.)
@@ -293,21 +254,27 @@ void setup_powerhold() {
 /**
  * Sensitive pin test for M42, M226
  */
-bool pin_is_protected(const int8_t pin) {
-  static const int8_t sensitive_pins[] PROGMEM = SENSITIVE_PINS;
-  for (uint8_t i = 0; i < COUNT(sensitive_pins); i++)
-    if (pin == (int8_t)pgm_read_byte(&sensitive_pins[i])) return true;
+bool pin_is_protected(const pin_t pin) {
+  static const pin_t sensitive_pins[] PROGMEM = SENSITIVE_PINS;
+  for (uint8_t i = 0; i < COUNT(sensitive_pins); i++) {
+    pin_t sensitive_pin;
+    memcpy_P(&sensitive_pin, &sensitive_pins[i], sizeof(pin_t));
+    if (pin == sensitive_pin) return true;
+  }
   return false;
 }
 
 void quickstop_stepper() {
-  stepper.quick_stop();
-  stepper.synchronize();
+  planner.quick_stop();
+  planner.synchronize();
   set_current_from_steppers_for_axis(ALL_AXES);
   SYNC_PLAN_POSITION_KINEMATIC();
 }
 
 void enable_all_steppers() {
+  #if ENABLED(AUTO_POWER_CONTROL)
+    powerManager.power_on();
+  #endif
   enable_X();
   enable_Y();
   enable_Z();
@@ -324,6 +291,16 @@ void disable_e_steppers() {
   disable_E2();
   disable_E3();
   disable_E4();
+}
+
+void disable_e_stepper(const uint8_t e) {
+  switch (e) {
+    case 0: disable_E0(); break;
+    case 1: disable_E1(); break;
+    case 2: disable_E2(); break;
+    case 3: disable_E3(); break;
+    case 4: disable_E4(); break;
+  }
 }
 
 void disable_all_steppers() {
@@ -345,18 +322,17 @@ void disable_all_steppers() {
  *  - Check if cooling fan needs to be switched on
  *  - Check if an idle but hot extruder needs filament extruded (EXTRUDER_RUNOUT_PREVENT)
  */
-void manage_inactivity(bool ignore_stepper_queue/*=false*/) {
+void manage_inactivity(const bool ignore_stepper_queue/*=false*/) {
 
   #if ENABLED(FILAMENT_RUNOUT_SENSOR)
-    if ((IS_SD_PRINTING || print_job_timer.isRunning()) && (READ(FIL_RUNOUT_PIN) == FIL_RUNOUT_INVERTING))
-      handle_filament_runout();
+    runout.run();
   #endif
 
   if (commands_in_queue < BUFSIZE) get_available_commands();
 
   const millis_t ms = millis();
 
-  if (max_inactive_time && ELAPSED(ms, gcode.previous_cmd_ms + max_inactive_time)) {
+  if (max_inactive_time && ELAPSED(ms, gcode.previous_move_ms + max_inactive_time)) {
     SERIAL_ERROR_START();
     SERIAL_ECHOLNPAIR(MSG_KILL_INACTIVE_TIME, parser.command_ptr);
     kill(PSTR(MSG_KILLED));
@@ -364,28 +340,31 @@ void manage_inactivity(bool ignore_stepper_queue/*=false*/) {
 
   // Prevent steppers timing-out in the middle of M600
   #if ENABLED(ADVANCED_PAUSE_FEATURE) && ENABLED(PAUSE_PARK_NO_STEPPER_TIMEOUT)
-    #define MOVE_AWAY_TEST !move_away_flag
+    #define MOVE_AWAY_TEST !did_pause_print
   #else
     #define MOVE_AWAY_TEST true
   #endif
 
-  if (MOVE_AWAY_TEST && stepper_inactive_time && ELAPSED(ms, gcode.previous_cmd_ms + stepper_inactive_time)
-      && !ignore_stepper_queue && !planner.blocks_queued()) {
-    #if ENABLED(DISABLE_INACTIVE_X)
-      disable_X();
-    #endif
-    #if ENABLED(DISABLE_INACTIVE_Y)
-      disable_Y();
-    #endif
-    #if ENABLED(DISABLE_INACTIVE_Z)
-      disable_Z();
-    #endif
-    #if ENABLED(DISABLE_INACTIVE_E)
-      disable_e_steppers();
-    #endif
-    #if ENABLED(AUTO_BED_LEVELING_UBL) && ENABLED(ULTRA_LCD)  // Only needed with an LCD
-      ubl.lcd_map_control = defer_return_to_status = false;
-    #endif
+  if (stepper_inactive_time) {
+    if (planner.has_blocks_queued())
+      gcode.previous_move_ms = ms; // reset_stepper_timeout to keep steppers powered
+    else if (MOVE_AWAY_TEST && !ignore_stepper_queue && ELAPSED(ms, gcode.previous_move_ms + stepper_inactive_time)) {
+      #if ENABLED(DISABLE_INACTIVE_X)
+        disable_X();
+      #endif
+      #if ENABLED(DISABLE_INACTIVE_Y)
+        disable_Y();
+      #endif
+      #if ENABLED(DISABLE_INACTIVE_Z)
+        disable_Z();
+      #endif
+      #if ENABLED(DISABLE_INACTIVE_E)
+        disable_e_steppers();
+      #endif
+      #if ENABLED(AUTO_BED_LEVELING_UBL) && ENABLED(ULTIPANEL)  // Only needed with an LCD
+        if (ubl.lcd_map_control) ubl.lcd_map_control = defer_return_to_status = false;
+      #endif
+    }
   }
 
   #ifdef CHDK // Check if pin should be set to LOW after M240 set it to HIGH
@@ -438,12 +417,26 @@ void manage_inactivity(bool ignore_stepper_queue/*=false*/) {
     controllerfan_update(); // Check if fan should be turned on to cool stepper drivers down
   #endif
 
+  #if ENABLED(AUTO_POWER_CONTROL)
+    powerManager.check();
+  #endif
+
   #if ENABLED(EXTRUDER_RUNOUT_PREVENT)
-    if (ELAPSED(ms, gcode.previous_cmd_ms + (EXTRUDER_RUNOUT_SECONDS) * 1000UL)
-      && thermalManager.degHotend(active_extruder) > EXTRUDER_RUNOUT_MINTEMP) {
+    if (thermalManager.degHotend(active_extruder) > EXTRUDER_RUNOUT_MINTEMP
+      && ELAPSED(ms, gcode.previous_move_ms + (EXTRUDER_RUNOUT_SECONDS) * 1000UL)
+      && !planner.has_blocks_queued()
+    ) {
       #if ENABLED(SWITCHING_EXTRUDER)
-        const bool oldstatus = E0_ENABLE_READ;
-        enable_E0();
+        bool oldstatus;
+        switch (active_extruder) {
+          default: oldstatus = E0_ENABLE_READ; enable_E0(); break;
+          #if E_STEPPERS > 1
+            case 2: case 3: oldstatus = E1_ENABLE_READ; enable_E1(); break;
+            #if E_STEPPERS > 2
+              case 4: oldstatus = E2_ENABLE_READ; enable_E2(); break;
+            #endif // E_STEPPERS > 2
+          #endif // E_STEPPERS > 1
+        }
       #else // !SWITCHING_EXTRUDER
         bool oldstatus;
         switch (active_extruder) {
@@ -463,17 +456,24 @@ void manage_inactivity(bool ignore_stepper_queue/*=false*/) {
         }
       #endif // !SWITCHING_EXTRUDER
 
-      gcode.refresh_cmd_timeout()
-
       const float olde = current_position[E_AXIS];
       current_position[E_AXIS] += EXTRUDER_RUNOUT_EXTRUDE;
       planner.buffer_line_kinematic(current_position, MMM_TO_MMS(EXTRUDER_RUNOUT_SPEED), active_extruder);
       current_position[E_AXIS] = olde;
       planner.set_e_position_mm(olde);
-      stepper.synchronize();
+      planner.synchronize();
+
       #if ENABLED(SWITCHING_EXTRUDER)
-        E0_ENABLE_WRITE(oldstatus);
-      #else
+        switch (active_extruder) {
+          default: oldstatus = E0_ENABLE_WRITE(oldstatus); break;
+          #if E_STEPPERS > 1
+            case 2: case 3: oldstatus = E1_ENABLE_WRITE(oldstatus); break;
+            #if E_STEPPERS > 2
+              case 4: oldstatus = E2_ENABLE_WRITE(oldstatus); break;
+            #endif // E_STEPPERS > 2
+          #endif // E_STEPPERS > 1
+        }
+      #else // !SWITCHING_EXTRUDER
         switch (active_extruder) {
           case 0: E0_ENABLE_WRITE(oldstatus); break;
           #if E_STEPPERS > 1
@@ -490,6 +490,8 @@ void manage_inactivity(bool ignore_stepper_queue/*=false*/) {
           #endif // E_STEPPERS > 1
         }
       #endif // !SWITCHING_EXTRUDER
+
+      gcode.previous_move_ms = ms; // reset_stepper_timeout to keep steppers powered
     }
   #endif // EXTRUDER_RUNOUT_PREVENT
 
@@ -498,7 +500,7 @@ void manage_inactivity(bool ignore_stepper_queue/*=false*/) {
     if (delayed_move_time && ELAPSED(ms, delayed_move_time + 1000UL) && IsRunning()) {
       // travel moves have been received so enact them
       delayed_move_time = 0xFFFFFFFFUL; // force moves to be done
-      set_destination_to_current();
+      set_destination_from_current();
       prepare_move_to_destination();
     }
   #endif
@@ -507,11 +509,16 @@ void manage_inactivity(bool ignore_stepper_queue/*=false*/) {
     handle_status_leds();
   #endif
 
-  #if ENABLED(HAVE_TMC2130)
-    tmc2130_checkOverTemp();
+  #if ENABLED(MONITOR_DRIVER_STATUS)
+    monitor_tmc_driver();
   #endif
 
-  planner.check_axes_activity();
+  // Limit check_axes_activity frequency to 10Hz
+  static millis_t next_check_axes_ms = 0;
+  if (ELAPSED(ms, next_check_axes_ms)) {
+    planner.check_axes_activity();
+    next_check_axes_ms = ms + 100UL;
+  }
 }
 
 /**
@@ -532,10 +539,6 @@ void idle(
     gcode.host_keepalive();
   #endif
 
-  #if ENABLED(AUTO_REPORT_TEMPERATURES) && (HAS_TEMP_HOTEND || HAS_TEMP_BED)
-    thermalManager.auto_report_temperatures();
-  #endif
-
   manage_inactivity(
     #if ENABLED(ADVANCED_PAUSE_FEATURE)
       no_stepper_sleep
@@ -553,12 +556,25 @@ void idle(
   #endif
 
   #if ENABLED(I2C_POSITION_ENCODERS)
-    if (planner.blocks_queued() &&
-        ( (blockBufferIndexRef != planner.block_buffer_head) ||
-          ((lastUpdateMillis + I2CPE_MIN_UPD_TIME_MS) < millis())) ) {
-      blockBufferIndexRef = planner.block_buffer_head;
+    static millis_t i2cpem_next_update_ms;
+    if (planner.has_blocks_queued() && ELAPSED(millis(), i2cpem_next_update_ms)) {
       I2CPEM.update();
-      lastUpdateMillis = millis();
+      i2cpem_next_update_ms = millis() + I2CPE_MIN_UPD_TIME_MS;
+    }
+  #endif
+
+  #ifdef HAL_IDLETASK
+    HAL_idletask();
+  #endif
+
+  #if HAS_AUTO_REPORTING
+    if (!suspend_auto_report) {
+      #if ENABLED(AUTO_REPORT_TEMPERATURES)
+        thermalManager.auto_report_temperatures();
+      #endif
+      #if ENABLED(AUTO_REPORT_SD_STATUS)
+        card.auto_report_sd_status();
+      #endif
     }
   #endif
 }
@@ -591,7 +607,7 @@ void kill(const char* lcd_msg) {
   #endif
 
   #if HAS_POWER_SWITCH
-    SET_INPUT(PS_ON_PIN);
+    PSU_OFF();
   #endif
 
   #if HAS_SUICIDE
@@ -646,18 +662,22 @@ void stop() {
  */
 void setup() {
 
+  #ifdef HAL_INIT
+    HAL_init();
+  #endif
+
   #if ENABLED(MAX7219_DEBUG)
     Max7219_init();
   #endif
 
-  #ifdef DISABLE_JTAG
+  #if ENABLED(DISABLE_JTAG)
     // Disable JTAG on AT90USB chips to free up pins for IO
     MCUCR = 0x80;
     MCUCR = 0x80;
   #endif
 
   #if ENABLED(FILAMENT_RUNOUT_SENSOR)
-    setup_filrunoutpin();
+    runout.setup();
   #endif
 
   setup_killpin();
@@ -668,11 +688,31 @@ void setup() {
     disableStepperDrivers();
   #endif
 
-  MYSERIAL.begin(BAUDRATE);
-  uint32_t serial_connect_timeout = millis() + 1000;
-  while(!MYSERIAL && PENDING(millis(), serial_connect_timeout));
+  #if NUM_SERIAL > 0
+    MYSERIAL0.begin(BAUDRATE);
+    #if NUM_SERIAL > 1
+      MYSERIAL1.begin(BAUDRATE);
+    #endif
+  #endif
+
+  #if NUM_SERIAL > 0
+    uint32_t serial_connect_timeout = millis() + 1000UL;
+    while(!MYSERIAL0 && PENDING(millis(), serial_connect_timeout)) { /*nada*/ }
+    #if NUM_SERIAL > 1
+      serial_connect_timeout = millis() + 1000UL;
+      while(!MYSERIAL1 && PENDING(millis(), serial_connect_timeout)) { /*nada*/ }
+    #endif
+  #endif
+
   SERIAL_PROTOCOLLNPGM("start");
   SERIAL_ECHO_START();
+
+  #if ENABLED(HAVE_TMC2130)
+    tmc_init_cs_pins();
+  #endif
+  #if ENABLED(HAVE_TMC2208)
+    tmc2208_serial_begin();
+  #endif
 
   // Check startup - does nothing if bootloader sets MCUSR to 0
   byte mcu = HAL_get_reset_source();
@@ -682,10 +722,6 @@ void setup() {
   if (mcu &  8) SERIAL_ECHOLNPGM(MSG_WATCHDOG_RESET);
   if (mcu & 32) SERIAL_ECHOLNPGM(MSG_SOFTWARE_RESET);
   HAL_clear_reset_source();
-
-  #if ENABLED(USE_WATCHDOG) //reinit watchdog after HAL_get_reset_source call
-    watchdog_init();
-  #endif
 
   SERIAL_ECHOPGM(MSG_MARLIN);
   SERIAL_CHAR(' ');
@@ -723,10 +759,18 @@ void setup() {
 
   thermalManager.init();    // Initialize temperature loop
 
-  stepper.init();    // Initialize stepper, this enables interrupts!
+  print_job_timer.init();   // Initial setup of print job timer
+
+  endstops.init();          // Init endstops and pullups
+
+  stepper.init();           // Init stepper. This enables interrupts!
 
   #if HAS_SERVOS
     servo_init();
+  #endif
+
+  #if HAS_Z_SERVO_PROBE
+    servo_probe_init();
   #endif
 
   #if HAS_PHOTOGRAPH
@@ -784,9 +828,8 @@ void setup() {
     OUT_WRITE(STAT_LED_BLUE_PIN, LOW); // turn it off
   #endif
 
-  #if ENABLED(NEOPIXEL_LED)
-    SET_OUTPUT(NEOPIXEL_PIN);
-    setup_neopixel();
+  #if HAS_COLOR_LEDS
+    leds.setup();
   #endif
 
   #if ENABLED(RGB_LED) || ENABLED(RGBW_LED)
@@ -809,24 +852,10 @@ void setup() {
   #endif
 
   lcd_init();
-
-  #ifndef CUSTOM_BOOTSCREEN_TIMEOUT
-    #define CUSTOM_BOOTSCREEN_TIMEOUT 2500
-  #endif
+  lcd_reset_status();
 
   #if ENABLED(SHOW_BOOTSCREEN)
-    #if ENABLED(DOGLCD)                           // On DOGM the first bootscreen is already drawn
-      #if ENABLED(SHOW_CUSTOM_BOOTSCREEN)
-        safe_delay(CUSTOM_BOOTSCREEN_TIMEOUT);    // Custom boot screen pause
-        lcd_bootscreen();                         // Show Marlin boot screen
-      #endif
-      safe_delay(BOOTSCREEN_TIMEOUT);             // Pause
-    #elif ENABLED(ULTRA_LCD)
-      lcd_bootscreen();
-      #if DISABLED(SDSUPPORT)
-        lcd_init();
-      #endif
-    #endif
+    lcd_bootscreen();
   #endif
 
   #if ENABLED(MIXING_EXTRUDER) && MIXING_VIRTUAL_TOOLS > 1
@@ -846,11 +875,7 @@ void setup() {
     i2c.onRequest(i2c_on_request);
   #endif
 
-  #if ENABLED(ENDSTOP_INTERRUPTS_FEATURE)
-    setup_endstop_interrupts();
-  #endif
-
-  #if ENABLED(SWITCHING_EXTRUDER) && !DONT_SWITCH
+  #if DO_SWITCH_EXTRUDER
     move_extruder_servo(0);  // Initialize extruder servo
   #endif
 
@@ -861,6 +886,14 @@ void setup() {
   #if ENABLED(PARKING_EXTRUDER)
     pe_magnet_init();
   #endif
+
+  #if ENABLED(POWER_LOSS_RECOVERY)
+    do_print_job_recovery();
+  #endif
+
+  #if ENABLED(USE_WATCHDOG) // Reinit watchdog after HAL_get_reset_source call
+    watchdog_init();
+  #endif
 }
 
 /**
@@ -868,20 +901,39 @@ void setup() {
  *
  *  - Save or log commands to SD
  *  - Process available commands (if not saving)
- *  - Call heater manager
- *  - Call inactivity manager
  *  - Call endstop manager
- *  - Call LCD update
+ *  - Call inactivity manager
  */
 void loop() {
-  if (commands_in_queue < BUFSIZE) get_available_commands();
 
-  #if ENABLED(SDSUPPORT)
-    card.checkautostart(false);
-  #endif
+  for (;;) {
 
-  advance_command_queue();
+    #if ENABLED(SDSUPPORT)
+      card.checkautostart();
+    #endif
 
-  endstops.report_state();
-  idle();
+    #if ENABLED(SDSUPPORT) && ENABLED(ULTIPANEL)
+      if (abort_sd_printing) {
+        abort_sd_printing = false;
+        card.stopSDPrint(
+          #if SD_RESORT
+            true
+          #endif
+        );
+        clear_command_queue();
+        quickstop_stepper();
+        print_job_timer.stop();
+        thermalManager.disable_all_heaters();
+        #if FAN_COUNT > 0
+          for (uint8_t i = 0; i < FAN_COUNT; i++) fanSpeeds[i] = 0;
+        #endif
+        wait_for_heatup = false;
+      }
+    #endif // SDSUPPORT && ULTIPANEL
+
+    if (commands_in_queue < BUFSIZE) get_available_commands();
+    advance_command_queue();
+    endstops.report_state();
+    idle();
+  }
 }
