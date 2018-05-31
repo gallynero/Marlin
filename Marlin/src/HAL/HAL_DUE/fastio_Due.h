@@ -21,100 +21,121 @@
  */
 
 /**
-  This code contributed by Triffid_Hunter and modified by Kliment
-  why double up on these macros? see http://gcc.gnu.org/onlinedocs/cpp/Stringification.html
-*/
+ * Fast I/O Routines for SAM3X8E
+ * Use direct port manipulation to save scads of processor time.
+ * Contributed by Triffid_Hunter and modified by Kliment, thinkyhead, Bob-the-Kuhn, et.al.
+ */
 
 /**
  * Description: Fast IO functions for Arduino Due and compatible (SAM3X8E)
  *
  * For ARDUINO_ARCH_SAM
+ * Note the code here was specifically crafted by disassembling what GCC produces
+ * out of it, so GCC is able to optimize it out as much as possible to the least
+ * amount of instructions. Be very carefull if you modify them, as "clean code"
+ * leads to less efficient compiled code!!
  */
 
 #ifndef _FASTIO_DUE_H
 #define _FASTIO_DUE_H
 
 /**
-  utility functions
-*/
+ * Utility functions
+ */
+
+// Due has 12 PWMs assigned to logical pins 2-13.
+// 6, 7, 8 & 9 come from the PWM controller. The others come from the timers.
+#define USEABLE_HARDWARE_PWM(p) ((2 <= p) && (p <= 13))
 
 #ifndef MASK
-  #define MASK(PIN)  (1 << PIN)
+  #define MASK(PIN) (1 << PIN)
 #endif
 
 /**
-  magic I/O routines
-  now you can simply SET_OUTPUT(STEP); WRITE(STEP, 1); WRITE(STEP, 0);
-*/
+ * Magic I/O routines
+ *
+ * Now you can simply SET_OUTPUT(STEP); WRITE(STEP, HIGH); WRITE(STEP, LOW);
+ *
+ * Why double up on these macros? see http://gcc.gnu.org/onlinedocs/cpp/Stringification.html
+ */
 
-/// Read a pin
-#define _READ(IO) ((bool)(DIO ## IO ## _WPORT -> PIO_PDSR & (MASK(DIO ## IO ## _PIN))))
+// Read a pin
+#define _READ(IO) bool(DIO ## IO ## _WPORT -> PIO_PDSR & MASK(DIO ## IO ## _PIN))
 
-/// Write to a pin
-#define _WRITE_VAR(IO, v) do {  if (v) {g_APinDescription[IO].pPort->PIO_SODR = g_APinDescription[IO].ulPin; } \
-                                    else {g_APinDescription[IO].pPort->PIO_CODR = g_APinDescription[IO].ulPin; } \
-                                 } while (0)
+// Write to a pin
+#define _WRITE_VAR(IO,V) do { \
+  volatile Pio* port = g_APinDescription[IO].pPort; \
+  uint32_t mask = g_APinDescription[IO].ulPin; \
+  if (V) port->PIO_SODR = mask; \
+  else port->PIO_CODR = mask; \
+} while(0)
 
-#define _WRITE(IO, v) do {  if (v) {DIO ## IO ## _WPORT -> PIO_SODR = MASK(DIO ## IO ##_PIN); } \
-                                else {DIO ##  IO ## _WPORT -> PIO_CODR = MASK(DIO ## IO ## _PIN); }; \
-                             } while (0)
+// Write to a pin
+#define _WRITE(IO,V) do { \
+  volatile Pio* port = (DIO ##  IO ## _WPORT); \
+  uint32_t mask = MASK(DIO ## IO ## _PIN); \
+  if (V) port->PIO_SODR = mask; \
+  else port->PIO_CODR = mask; \
+} while(0)
 
-/// toggle a pin
-#define _TOGGLE(IO)  _WRITE(IO, !READ(IO))
+// toggle a pin
+#define _TOGGLE(IO) _WRITE(IO, !READ(IO))
 
-/// set pin as input
-#define _SET_INPUT(IO)  pmc_enable_periph_clk(g_APinDescription[IO].ulPeripheralId); \
-                        PIO_Configure(g_APinDescription[IO].pPort, PIO_INPUT, g_APinDescription[IO].ulPin, 0)
-/// set pin as output
-#define _SET_OUTPUT(IO)  PIO_Configure(g_APinDescription[IO].pPort, PIO_OUTPUT_1, \
-                         g_APinDescription[IO].ulPin, g_APinDescription[IO].ulPinConfiguration)
+// set pin as input
+#define _SET_INPUT(IO) do{ \
+  pmc_enable_periph_clk(g_APinDescription[IO].ulPeripheralId); \
+  PIO_Configure(g_APinDescription[IO].pPort, PIO_INPUT, g_APinDescription[IO].ulPin, 0); \
+}while(0)
 
-/// set pin as input with pullup mode
-#define _PULLUP(IO, v)  { pinMode(IO, (v!=LOW ? INPUT_PULLUP : INPUT)); }
+// set pin as output
+#define _SET_OUTPUT(IO) do{ \
+  pmc_enable_periph_clk(g_APinDescription[IO].ulPeripheralId); \
+  PIO_Configure(g_APinDescription[IO].pPort, _READ(IO) ? PIO_OUTPUT_1 : PIO_OUTPUT_0, g_APinDescription[IO].ulPin, g_APinDescription[IO].ulPinConfiguration); \
+  g_pinStatus[IO] = (g_pinStatus[IO] & 0xF0) | PIN_STATUS_DIGITAL_OUTPUT;\
+}while(0)
 
-/// check if pin is an input
+// set pin as input with pullup mode
+#define _PULLUP(IO,V) pinMode(IO, (V) ? INPUT_PULLUP : INPUT)
+
+// check if pin is an input
 #define _GET_INPUT(IO)
-/// check if pin is an output
+// check if pin is an output
 #define _GET_OUTPUT(IO)
 
-/// check if pin is an timer
+// check if pin is a timer
 #define _GET_TIMER(IO)
 
-//  why double up on these macros? see http://gcc.gnu.org/onlinedocs/cpp/Stringification.html
+// Read a pin wrapper
+#define READ(IO) _READ(IO)
 
-/// Read a pin wrapper
-#define READ(IO)  _READ(IO)
+// Write to a pin wrapper
+#define WRITE_VAR(IO,V) _WRITE_VAR(IO,V)
+#define WRITE(IO,V) _WRITE(IO,V)
 
-/// Write to a pin wrapper
-#define WRITE_VAR(IO, v)  _WRITE_VAR(IO, v)
-#define WRITE(IO, v)  _WRITE(IO, v)
+// toggle a pin wrapper
+#define TOGGLE(IO) _TOGGLE(IO)
 
-/// toggle a pin wrapper
-#define TOGGLE(IO)  _TOGGLE(IO)
-
-/// set pin as input wrapper
-#define SET_INPUT(IO)  _SET_INPUT(IO)
-/// set pin as input with pullup wrapper
+// set pin as input wrapper
+#define SET_INPUT(IO) _SET_INPUT(IO)
+// set pin as input with pullup wrapper
 #define SET_INPUT_PULLUP(IO) do{ _SET_INPUT(IO); _PULLUP(IO, HIGH); }while(0)
-/// set pin as output wrapper
-#define SET_OUTPUT(IO)  do{ _SET_OUTPUT(IO); _WRITE(IO, LOW); }while(0)
+// set pin as output wrapper -  reads the pin and sets the output to that value
+#define SET_OUTPUT(IO) _SET_OUTPUT(IO)
+// check if pin is an input wrapper
+#define GET_INPUT(IO) _GET_INPUT(IO)
+// check if pin is an output wrapper
+#define GET_OUTPUT(IO) _GET_OUTPUT(IO)
 
-/// check if pin is an input wrapper
-#define GET_INPUT(IO)  _GET_INPUT(IO)
-/// check if pin is an output wrapper
-#define GET_OUTPUT(IO)  _GET_OUTPUT(IO)
-
-/// check if pin is an timer wrapper
-#define GET_TIMER(IO)  _GET_TIMER(IO)
+// check if pin is a timer (wrapper)
+#define GET_TIMER(IO) _GET_TIMER(IO)
 
 // Shorthand
-#define OUT_WRITE(IO, v) { SET_OUTPUT(IO); WRITE(IO, v); }
+#define OUT_WRITE(IO,V) { SET_OUTPUT(IO); WRITE(IO,V); }
 
 /**
-  ports and functions
-
-  added as necessary or if I feel like it- not a comprehensive list!
-*/
+ * Ports and functions
+ * Added as necessary or if I feel like it- not a comprehensive list!
+ */
 
 // UART
 #define RXD        DIO0
@@ -125,8 +146,8 @@
 #define SDA        DIO20
 
 /**
-pins
-*/
+ * pins
+ */
 
 #define DIO0_PIN 8
 #define DIO0_WPORT PIOA
@@ -404,31 +425,81 @@ pins
 #define DIO91_PIN 15
 #define DIO91_WPORT PIOB
 
-#define DIO92_PIN 5
-#define DIO92_WPORT PIOA
+#if ARDUINO_SAM_ARCHIM
+  #define DIO92_PIN 11
+  #define DIO92_WPORT PIOC
 
-#define DIO93_PIN 12
-#define DIO93_WPORT PIOB
+  #define DIO93_PIN 2
+  #define DIO93_WPORT PIOB
 
-#define DIO94_PIN 22
-#define DIO94_WPORT PIOB
+  #define DIO94_PIN 1
+  #define DIO94_WPORT PIOB
 
-#define DIO95_PIN 23
-#define DIO95_WPORT PIOB
+  #define DIO95_PIN 0
+  #define DIO95_WPORT PIOB
 
-#define DIO96_PIN 24
-#define DIO96_WPORT PIOB
+  #define DIO96_PIN 10
+  #define DIO96_WPORT PIOC
 
-#define DIO97_PIN 20
-#define DIO97_WPORT PIOC
+  #define DIO97_PIN 24
+  #define DIO97_WPORT PIOB
 
-#define DIO98_PIN 27
-#define DIO98_WPORT PIOC
+  #define DIO98_PIN 7
+  #define DIO98_WPORT PIOB
 
-#define DIO99_PIN 10
-#define DIO99_WPORT PIOC
+  #define DIO99_PIN 6
+  #define DIO99_WPORT PIOB
 
-#define DIO100_PIN 11
-#define DIO100_WPORT PIOC
+  #define DIO100_PIN 8
+  #define DIO100_WPORT PIOB
+
+  #define DIO101_PIN 5
+  #define DIO101_WPORT PIOB
+
+  #define DIO102_PIN 4
+  #define DIO102_WPORT PIOB
+
+  #define DIO103_PIN 3
+  #define DIO103_WPORT PIOB
+
+  #define DIO104_PIN 20
+  #define DIO104_WPORT PIOC
+
+  #define DIO105_PIN 22
+  #define DIO105_WPORT PIOB
+
+  #define DIO106_PIN 27
+  #define DIO106_WPORT PIOC
+
+  #define DIO107_PIN 10
+  #define DIO107_WPORT PIOB
+#else
+  #define DIO92_PIN 5
+  #define DIO92_WPORT PIOA
+
+  #define DIO93_PIN 12
+  #define DIO93_WPORT PIOB
+
+  #define DIO94_PIN 22
+  #define DIO94_WPORT PIOB
+
+  #define DIO95_PIN 23
+  #define DIO95_WPORT PIOB
+
+  #define DIO96_PIN 24
+  #define DIO96_WPORT PIOB
+
+  #define DIO97_PIN 20
+  #define DIO97_WPORT PIOC
+
+  #define DIO98_PIN 27
+  #define DIO98_WPORT PIOC
+
+  #define DIO99_PIN 10
+  #define DIO99_WPORT PIOC
+
+  #define DIO100_PIN 11
+  #define DIO100_WPORT PIOC
+#endif
 
 #endif // _FASTIO_DUE_H

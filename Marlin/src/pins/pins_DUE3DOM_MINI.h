@@ -35,7 +35,7 @@
 //
 #define SERVO0_PIN          5
 #define SERVO1_PIN          6
-#define SERVO2_PIN          8 // 4-pin header FAN0
+#define SERVO2_PIN          8   // 4-pin header FAN0
 #define SERVO3_PIN         -1
 
 //
@@ -77,21 +77,21 @@
 
 // SPI for Max6675 or Max31855 Thermocouple
 #if DISABLED(SDSUPPORT)
-  #define MAX6675_SS        53
+  #define MAX6675_SS       53
 #else
-  #define MAX6675_SS        53
+  #define MAX6675_SS       53
 #endif
 
 //
 // Heaters / Fans
 //
-#define HEATER_0_PIN       13 // HOTEND0 MOSFET
-#define HEATER_BED_PIN      7 // BED MOSFET
+#define HEATER_0_PIN       13   // HOTEND0 MOSFET
+#define HEATER_BED_PIN      7   // BED MOSFET
 
-#define FAN_PIN            11 // FAN1 header on board - PRINT FAN
-#define FAN1_PIN           12 // FAN2 header on board - CONTROLLER FAN
-#define FAN2_PIN            9 // FAN3 header on board - EXTRUDER0 FAN
-//#define FAN3_PIN          8 // FAN0 4-pin header on board
+#define FAN_PIN            11   // FAN1 header on board - PRINT FAN
+#define FAN1_PIN           12   // FAN2 header on board - CONTROLLER FAN
+#define FAN2_PIN            9   // FAN3 header on board - EXTRUDER0 FAN
+//#define FAN3_PIN          8   // FAN0 4-pin header on board
 
 //
 // Misc. Functions
@@ -103,6 +103,7 @@
 // LCD / Controller
 //
 #if ENABLED(ULTRA_LCD)
+
   #define LCD_PINS_RS       42
   #define LCD_PINS_ENABLE   43
   #define LCD_PINS_D4       44
@@ -111,6 +112,7 @@
   #define LCD_PINS_D7       47
 
   #if ENABLED(REPRAP_DISCOUNT_SMART_CONTROLLER)
+
     #define BEEPER_PIN      41
 
     #define BTN_EN1         50
@@ -120,8 +122,8 @@
     #define SDSS             4
     #define SD_DETECT_PIN   14
 
-  // RADDS LCD panel
   #elif ENABLED(RADDS_DISPLAY)
+
     #define BEEPER_PIN      41
 
     #define BTN_EN1         50
@@ -135,6 +137,7 @@
     #define SD_DETECT_PIN   14
 
   #elif ENABLED(SSD1306_OLED_I2C_CONTROLLER)
+
     #define BTN_EN1         50
     #define BTN_EN2         52
     #define BTN_ENC         48
@@ -143,6 +146,7 @@
     #define SD_DETECT_PIN   14
 
   #elif ENABLED(SPARK_FULL_GRAPHICS)
+
     #define LCD_PINS_D4     29
     #define LCD_PINS_ENABLE 27
     #define LCD_PINS_RS     25
@@ -152,5 +156,16 @@
     #define BTN_ENC         37
 
     #define BEEPER_PIN      -1
+
+   #elif ENABLED(MINIPANEL)
+    #define BTN_EN1         52
+    #define BTN_EN2         50
+    #define BTN_ENC         48
+    #define LCD_SDSS        4
+    #define SD_DETECT_PIN   14
+    #define BEEPER_PIN      41
+    #define DOGLCD_A0       46
+    #define DOGLCD_CS       45
+
   #endif // SPARK_FULL_GRAPHICS
 #endif // ULTRA_LCD

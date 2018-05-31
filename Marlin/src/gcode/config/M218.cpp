@@ -27,37 +27,58 @@
 #include "../gcode.h"
 #include "../../module/motion.h"
 
+#if ENABLED(DELTA)
+  #include "../../module/planner.h"
+#endif
+
 /**
  * M218 - set hotend offset (in linear units)
  *
  *   T<tool>
  *   X<xoffset>
  *   Y<yoffset>
- *   Z<zoffset> - Available with DUAL_X_CARRIAGE and SWITCHING_NOZZLE
+ *   Z<zoffset> - Available with DUAL_X_CARRIAGE, SWITCHING_NOZZLE and PARKING_EXTRUDER
  */
 void GcodeSuite::M218() {
   if (get_target_extruder_from_command() || target_extruder == 0) return;
 
-  if (parser.seenval('X')) hotend_offset[X_AXIS][target_extruder] = parser.value_linear_units();
-  if (parser.seenval('Y')) hotend_offset[Y_AXIS][target_extruder] = parser.value_linear_units();
+  bool report = true;
+  if (parser.seenval('X')) {
+    hotend_offset[X_AXIS][target_extruder] = parser.value_linear_units();
+    report = false;
+  }
+  if (parser.seenval('Y')) {
+    hotend_offset[Y_AXIS][target_extruder] = parser.value_linear_units();
+    report = false;
+  }
 
-  #if ENABLED(DUAL_X_CARRIAGE) || ENABLED(SWITCHING_NOZZLE) || ENABLED(PARKING_EXTRUDER)
-    if (parser.seenval('Z')) hotend_offset[Z_AXIS][target_extruder] = parser.value_linear_units();
+  #if HAS_HOTEND_OFFSET_Z
+    if (parser.seenval('Z')) {
+      hotend_offset[Z_AXIS][target_extruder] = parser.value_linear_units();
+      report = false;
+    }
   #endif
 
-  SERIAL_ECHO_START();
-  SERIAL_ECHOPGM(MSG_HOTEND_OFFSET);
-  HOTEND_LOOP() {
-    SERIAL_CHAR(' ');
-    SERIAL_ECHO(hotend_offset[X_AXIS][e]);
-    SERIAL_CHAR(',');
-    SERIAL_ECHO(hotend_offset[Y_AXIS][e]);
-    #if ENABLED(DUAL_X_CARRIAGE) || ENABLED(SWITCHING_NOZZLE) || ENABLED(PARKING_EXTRUDER)
+  if (report) {
+    SERIAL_ECHO_START();
+    SERIAL_ECHOPGM(MSG_HOTEND_OFFSET);
+    HOTEND_LOOP() {
+      SERIAL_CHAR(' ');
+      SERIAL_ECHO(hotend_offset[X_AXIS][e]);
       SERIAL_CHAR(',');
-      SERIAL_ECHO(hotend_offset[Z_AXIS][e]);
-    #endif
+      SERIAL_ECHO(hotend_offset[Y_AXIS][e]);
+      #if HAS_HOTEND_OFFSET_Z
+        SERIAL_CHAR(',');
+        SERIAL_ECHO(hotend_offset[Z_AXIS][e]);
+      #endif
+    }
+    SERIAL_EOL();
   }
-  SERIAL_EOL();
+
+  #if ENABLED(DELTA)
+    if (target_extruder == active_extruder)
+      do_blocking_move_to_xy(current_position[X_AXIS], current_position[Y_AXIS], planner.max_feedrate_mm_s[X_AXIS]);
+  #endif
 }
 
 #endif // HOTENDS > 1

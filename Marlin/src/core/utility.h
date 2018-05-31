@@ -23,7 +23,7 @@
 #ifndef __UTILITY_H__
 #define __UTILITY_H__
 
-#include "../inc/MarlinConfig.h"
+#include "../inc/MarlinConfigPre.h"
 
 constexpr char axis_codes[XYZE] = { 'X', 'Y', 'Z', 'E' };
 
@@ -33,7 +33,19 @@ void safe_delay(millis_t ms);
   void crc16(uint16_t *crc, const void * const data, uint16_t cnt);
 #endif
 
-#if ENABLED(ULTRA_LCD)
+#if ENABLED(AUTO_BED_LEVELING_UBL) || ENABLED(G26_MESH_VALIDATION)
+  /**
+   * These support functions allow the use of large bit arrays of flags that take very
+   * little RAM. Currently they are limited to being 16x16 in size. Changing the declaration
+   * to unsigned long will allow us to go to 32x32 if higher resolution Mesh's are needed
+   * in the future.
+   */
+  FORCE_INLINE void bitmap_clear(uint16_t bits[16], const uint8_t x, const uint8_t y)  { CBI(bits[y], x); }
+  FORCE_INLINE void bitmap_set(uint16_t bits[16], const uint8_t x, const uint8_t y)    { SBI(bits[y], x); }
+  FORCE_INLINE bool is_bitmap_set(uint16_t bits[16], const uint8_t x, const uint8_t y) { return TEST(bits[y], x); }
+#endif
+
+#if ENABLED(ULTRA_LCD) || ENABLED(DEBUG_LEVELING_FEATURE)
 
   // Convert uint8_t to string with 123 format
   char* i8tostr3(const uint8_t x);
@@ -45,13 +57,13 @@ void safe_delay(millis_t ms);
   char* itostr3left(const int xx);
 
   // Convert signed int to rj string with _123, -123, _-12, or __-1 format
-  char *itostr4sign(const int x);
+  char* itostr4sign(const int x);
 
   // Convert unsigned float to string with 1.23 format
   char* ftostr12ns(const float &x);
 
   // Convert signed float to fixed-length string with 023.45 / -23.45 format
-  char* ftostr32(const float &x);
+  char* ftostr52(const float &x);
 
   // Convert float to fixed-length string with +123.4 / -123.4 format
   char* ftostr41sign(const float &x);
@@ -75,14 +87,14 @@ void safe_delay(millis_t ms);
   char* ftostr62rj(const float &x);
 
   // Convert float to rj string with 123 or -12 format
-  FORCE_INLINE char *ftostr3(const float &x) { return itostr3((int)x); }
+  FORCE_INLINE char* ftostr3(const float &x) { return itostr3(int(x + (x < 0 ? -0.5 : 0.5))); }
 
   #if ENABLED(LCD_DECIMAL_SMALL_XY)
     // Convert float to rj string with 1234, _123, 12.3, _1.2, -123, _-12, or -1.2 format
-    char *ftostr4sign(const float &fx);
+    char* ftostr4sign(const float &fx);
   #else
     // Convert float to rj string with 1234, _123, -123, __12, _-12, ___1, or __-1 format
-    FORCE_INLINE char *ftostr4sign(const float &x) { return itostr4sign((int)x); }
+    FORCE_INLINE char* ftostr4sign(const float &x) { return itostr4sign(int(x + (x < 0 ? -0.5 : 0.5))); }
   #endif
 
 #endif // ULTRA_LCD

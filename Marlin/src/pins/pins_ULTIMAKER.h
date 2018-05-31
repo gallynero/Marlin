@@ -40,12 +40,10 @@
 #define DEFAULT_SOURCE_CODE_URL "https://github.com/Ultimaker/Marlin"
 #define BOARD_NAME              "Ultimaker"
 
-#define LARGE_FLASH true
-
 //
 // Servos
 //
-#define SERVO0_PIN         13 // untested
+#define SERVO0_PIN         13   // UNTESTED
 
 //
 // Limit Switches
@@ -159,6 +157,6 @@
 //
 // M3/M4/M5 - Spindle/Laser Control
 //
-#define SPINDLE_LASER_PWM_PIN     9  // MUST BE HARDWARE PWM
-#define SPINDLE_LASER_ENABLE_PIN 10  // Pin should have a pullup!
-#define SPINDLE_DIR_PIN          11  // use the EXP3 PWM header
+#define SPINDLE_LASER_PWM_PIN     9   // MUST BE HARDWARE PWM
+#define SPINDLE_LASER_ENABLE_PIN 10   // Pin should have a pullup!
+#define SPINDLE_DIR_PIN          11   // use the EXP3 PWM header

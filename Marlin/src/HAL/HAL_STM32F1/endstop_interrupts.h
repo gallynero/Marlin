@@ -36,7 +36,7 @@
  * Endstop Interrupts
  *
  * Without endstop interrupts the endstop pins must be polled continually in
- * the stepper-ISR via endstops.update(), most of the time finding no change.
+ * the temperature-ISR via endstops.update(), most of the time finding no change.
  * With this feature endstops.update() is called only when we know that at
  * least one endstop has changed state, saving valuable CPU cycles.
  *
@@ -49,41 +49,46 @@
 #ifndef _ENDSTOP_INTERRUPTS_H_
 #define _ENDSTOP_INTERRUPTS_H_
 
+#include "../../module/endstops.h"
+
+// One ISR for all EXT-Interrupts
+void endstop_ISR(void) { endstops.check_possible_change(); }
+
 void setup_endstop_interrupts(void) {
   #if HAS_X_MAX
-    pinMode(X_MAX_PIN, INPUT);
+    SET_INPUT(X_MAX_PIN);
     attachInterrupt(X_MAX_PIN, endstop_ISR, CHANGE); // assign it
   #endif
   #if HAS_X_MIN
-    pinMode(X_MIN_PIN, INPUT);
+    SET_INPUT(X_MIN_PIN);
     attachInterrupt(X_MIN_PIN, endstop_ISR, CHANGE);
   #endif
   #if HAS_Y_MAX
-    pinMode(Y_MAX_PIN, INPUT);
+    SET_INPUT(Y_MAX_PIN);
     attachInterrupt(Y_MAX_PIN, endstop_ISR, CHANGE);
   #endif
   #if HAS_Y_MIN
-    pinMode(Y_MIN_PIN, INPUT);
+    SET_INPUT(Y_MIN_PIN);
     attachInterrupt(Y_MIN_PIN, endstop_ISR, CHANGE);
   #endif
   #if HAS_Z_MAX
-    pinMode(Z_MAX_PIN, INPUT);
+    SET_INPUT(Z_MAX_PIN);
     attachInterrupt(Z_MAX_PIN, endstop_ISR, CHANGE);
   #endif
   #if HAS_Z_MIN
-    pinMode(Z_MIN_PIN, INPUT);
+    SET_INPUT(Z_MIN_PIN);
     attachInterrupt(Z_MIN_PIN, endstop_ISR, CHANGE);
   #endif
   #if HAS_Z2_MAX
-    pinMode(Z2_MAX_PIN, INPUT);
+    SET_INPUT(Z2_MAX_PIN);
     attachInterrupt(Z2_MAX_PIN, endstop_ISR, CHANGE);
   #endif
   #if HAS_Z2_MIN
-    pinMode(Z2_MIN_PIN, INPUT);
+    SET_INPUT(Z2_MIN_PIN);
     attachInterrupt(Z2_MIN_PIN, endstop_ISR, CHANGE);
   #endif
   #if HAS_Z_MIN_PROBE_PIN
-    pinMode(Z_MIN_PROBE_PIN, INPUT);
+    SET_INPUT(Z_MIN_PROBE_PIN);
     attachInterrupt(Z_MIN_PROBE_PIN, endstop_ISR, CHANGE);
   #endif
 }

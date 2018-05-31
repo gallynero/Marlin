@@ -69,6 +69,8 @@
     uint8_t xon_xoff_state = XON_XOFF_CHAR_SENT | XON_CHAR;
   #endif
 
+  void clear_command_queue();
+
   #if ENABLED(SERIAL_STATS_DROPPED_RX)
     uint8_t rx_dropped_bytes = 0;
   #endif
@@ -78,104 +80,24 @@
   #endif
 
   #if ENABLED(EMERGENCY_PARSER)
-
-    #include "../../module/stepper.h"
-
-    // Currently looking for: M108, M112, M410
-    // If you alter the parser please don't forget to update the capabilities in Conditionals_post.h
-
-    FORCE_INLINE void emergency_parser(const unsigned char c) {
-
-      static e_parser_state state = state_RESET;
-
-      switch (state) {
-        case state_RESET:
-          switch (c) {
-            case ' ': break;
-            case 'N': state = state_N;      break;
-            case 'M': state = state_M;      break;
-            default: state = state_IGNORE;
-          }
-          break;
-
-        case state_N:
-          switch (c) {
-            case '0': case '1': case '2':
-            case '3': case '4': case '5':
-            case '6': case '7': case '8':
-            case '9': case '-': case ' ':   break;
-            case 'M': state = state_M;      break;
-            default:  state = state_IGNORE;
-          }
-          break;
-
-        case state_M:
-          switch (c) {
-            case ' ': break;
-            case '1': state = state_M1;     break;
-            case '4': state = state_M4;     break;
-            default: state = state_IGNORE;
-          }
-          break;
-
-        case state_M1:
-          switch (c) {
-            case '0': state = state_M10;    break;
-            case '1': state = state_M11;    break;
-            default: state = state_IGNORE;
-          }
-          break;
-
-        case state_M10:
-          state = (c == '8') ? state_M108 : state_IGNORE;
-          break;
-
-        case state_M11:
-          state = (c == '2') ? state_M112 : state_IGNORE;
-          break;
-
-        case state_M4:
-          state = (c == '1') ? state_M41 : state_IGNORE;
-          break;
-
-        case state_M41:
-          state = (c == '0') ? state_M410 : state_IGNORE;
-          break;
-
-        case state_IGNORE:
-          if (c == '\n') state = state_RESET;
-          break;
-
-        default:
-          if (c == '\n') {
-            switch (state) {
-              case state_M108:
-                wait_for_user = wait_for_heatup = false;
-                break;
-              case state_M112:
-                kill(PSTR(MSG_KILLED));
-                break;
-              case state_M410:
-                quickstop_stepper();
-                break;
-              default:
-                break;
-            }
-            state = state_RESET;
-          }
-      }
-    }
-
-  #endif // EMERGENCY_PARSER
+    #include "../../feature/emergency_parser.h"
+  #endif
 
   FORCE_INLINE void store_rxd_char() {
+
+    #if ENABLED(EMERGENCY_PARSER)
+      static EmergencyParser::State emergency_state; // = EP_RESET
+    #endif
+
     const ring_buffer_pos_t h = rx_buffer.head,
                             i = (ring_buffer_pos_t)(h + 1) & (ring_buffer_pos_t)(RX_BUFFER_SIZE - 1);
+
+    // Read the character
+    const uint8_t c = M_UDRx;
 
     // If the character is to be stored at the index just before the tail
     // (such that the head would advance to the current tail), the buffer is
     // critical, so don't write the character or advance the head.
-    const char c = M_UDRx;
     if (i != rx_buffer.tail) {
       rx_buffer.buffer[h] = c;
       rx_buffer.head = i;
@@ -194,6 +116,7 @@
     #endif
 
     #if ENABLED(SERIAL_XON_XOFF)
+
       // for high speed transfers, we can use XON/XOFF protocol to do
       // software handshake and avoid overruns.
       if ((xon_xoff_state & XON_XOFF_CHAR_MASK) == XON_CHAR) {
@@ -241,7 +164,7 @@
     #endif // SERIAL_XON_XOFF
 
     #if ENABLED(EMERGENCY_PARSER)
-      emergency_parser(c);
+      emergency_parser.update(emergency_state, c);
     #endif
   }
 
@@ -384,7 +307,8 @@
     // reading rx_buffer_head and updating rx_buffer_tail, the previous rx_buffer_head
     // may be written to rx_buffer_tail, making the buffer appear full rather than empty.
     CRITICAL_SECTION_START;
-      rx_buffer.head = rx_buffer.tail;
+      rx_buffer.head = rx_buffer.tail = 0;
+      clear_command_queue();
     CRITICAL_SECTION_END;
 
     #if ENABLED(SERIAL_XON_XOFF)

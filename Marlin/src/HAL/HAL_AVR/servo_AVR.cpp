@@ -42,8 +42,8 @@
  *
  * write()               - Set the servo angle in degrees. (Invalid angles —over MIN_PULSE_WIDTH— are treated as µs.)
  * writeMicroseconds()   - Set the servo pulse width in microseconds.
- * move(pin, angle)      - Sequence of attach(pin), write(angle), delay(SERVO_DELAY).
- *                         With DEACTIVATE_SERVOS_AFTER_MOVE it detaches after SERVO_DELAY.
+ * move(pin, angle)      - Sequence of attach(pin), write(angle), safe_delay(servo_delay[servoIndex]).
+ *                         With DEACTIVATE_SERVOS_AFTER_MOVE it detaches after servo_delay[servoIndex].
  * read()                - Get the last-written servo pulse width as an angle between 0 and 180.
  * readMicroseconds()    - Get the last-written servo pulse width in microseconds.
  * attached()            - Return true if a servo is attached.
@@ -63,7 +63,7 @@
 #include "../servo.h"
 #include "../servo_private.h"
 
-static volatile int8_t Channel[_Nbr_16timers ];             // counter for the servo being pulsed for each timer (or -1 if refresh interval)
+static volatile int8_t Channel[_Nbr_16timers];              // counter for the servo being pulsed for each timer (or -1 if refresh interval)
 
 
 /************ static functions common to all instances ***********************/

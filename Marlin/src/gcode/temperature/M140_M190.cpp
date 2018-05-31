@@ -22,7 +22,7 @@
 
 #include "../../inc/MarlinConfig.h"
 
-#if HAS_HEATER_BED && HAS_TEMP_BED
+#if HAS_HEATED_BED
 
 #include "../gcode.h"
 #include "../../module/temperature.h"
@@ -61,7 +61,6 @@ void GcodeSuite::M140() {
 void GcodeSuite::M190() {
   if (DEBUGGING(DRYRUN)) return;
 
-  LCD_MESSAGEPGM(MSG_BED_HEATING);
   const bool no_wait_for_cooling = parser.seenval('S');
   if (no_wait_for_cooling || parser.seenval('R')) {
     thermalManager.setTargetBed(parser.value_celsius());
@@ -71,6 +70,8 @@ void GcodeSuite::M190() {
     #endif
   }
   else return;
+
+  lcd_setstatusPGM(thermalManager.isHeatingBed() ? PSTR(MSG_BED_HEATING) : PSTR(MSG_BED_COOLING));
 
   #if TEMP_BED_RESIDENCY_TIME > 0
     millis_t residency_start_ms = 0;
@@ -94,7 +95,7 @@ void GcodeSuite::M190() {
 
   #if ENABLED(PRINTER_EVENT_LEDS)
     const float start_temp = thermalManager.degBed();
-    uint8_t old_red = 255;
+    uint8_t old_red = 127;
   #endif
 
   do {
@@ -122,7 +123,7 @@ void GcodeSuite::M190() {
     }
 
     idle();
-    refresh_cmd_timeout(); // to prevent stepper_inactive_time from running out
+    reset_stepper_timeout(); // Keep steppers powered
 
     const float temp = thermalManager.degBed();
 
@@ -132,14 +133,19 @@ void GcodeSuite::M190() {
         const uint8_t red = map(constrain(temp, start_temp, target_temp), start_temp, target_temp, 0, 255);
         if (red != old_red) {
           old_red = red;
-          set_led_color(red, 0, 255);
+          leds.set_color(
+            MakeLEDColor(red, 0, 255, 0, pixels.getBrightness())
+            #if ENABLED(NEOPIXEL_IS_SEQUENTIAL)
+              , true
+            #endif
+          );
         }
       }
     #endif
 
     #if TEMP_BED_RESIDENCY_TIME > 0
 
-      const float temp_diff = FABS(target_temp - temp);
+      const float temp_diff = ABS(target_temp - temp);
 
       if (!residency_start_ms) {
         // Start the TEMP_BED_RESIDENCY_TIME timer when we reach target temp for the first time.
@@ -165,10 +171,10 @@ void GcodeSuite::M190() {
 
   } while (wait_for_heatup && TEMP_BED_CONDITIONS);
 
-  if (wait_for_heatup) LCD_MESSAGEPGM(MSG_BED_DONE);
+  if (wait_for_heatup) lcd_reset_status();
   #if DISABLED(BUSY_WHILE_HEATING)
     KEEPALIVE_STATE(IN_HANDLER);
   #endif
 }
 
-#endif // HAS_HEATER_BED && HAS_TEMP_BED
+#endif // HAS_HEATED_BED

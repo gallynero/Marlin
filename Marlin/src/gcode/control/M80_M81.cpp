@@ -36,17 +36,21 @@
 
 #if HAS_POWER_SWITCH
 
+  #if ENABLED(AUTO_POWER_CONTROL)
+    #include "../../feature/power.h"
+  #endif
+
   // Could be moved to a feature, but this is all the data
-  bool powersupply_on =
+  bool powersupply_on = (
     #if ENABLED(PS_DEFAULT_OFF)
       false
     #else
       true
     #endif
-  ;
+  );
 
-  #if ENABLED(HAVE_TMC2130)
-    #include "../../feature/tmc2130.h"
+  #if HAS_TRINAMIC
+    #include "../../feature/tmc_util.h"
   #endif
 
   /**
@@ -61,7 +65,7 @@
       return;
     }
 
-    OUT_WRITE(PS_ON_PIN, PS_ON_AWAKE); // GND
+    PSU_ON();
 
     /**
      * If you have a switch on suicide pin, this is useful
@@ -72,15 +76,13 @@
       OUT_WRITE(SUICIDE_PIN, HIGH);
     #endif
 
-    #if ENABLED(HAVE_TMC2130)
-      delay(100);
-      tmc2130_init(); // Settings only stick when the driver has power
+    #if DISABLED(AUTO_POWER_CONTROL)
+      delay(100); // Wait for power to settle
+      restore_stepper_drivers();
     #endif
 
-    powersupply_on = true;
-
     #if ENABLED(ULTIPANEL)
-      LCD_MESSAGEPGM(WELCOME_MSG);
+      lcd_reset_status();
     #endif
   }
 
@@ -93,7 +95,7 @@
  */
 void GcodeSuite::M81() {
   thermalManager.disable_all_heaters();
-  stepper.finish_and_disable();
+  planner.finish_and_disable();
 
   #if FAN_COUNT > 0
     for (uint8_t i = 0; i < FAN_COUNT; i++) fanSpeeds[i] = 0;
@@ -106,11 +108,9 @@ void GcodeSuite::M81() {
   safe_delay(1000); // Wait 1 second before switching off
 
   #if HAS_SUICIDE
-    stepper.synchronize();
     suicide();
   #elif HAS_POWER_SWITCH
-    OUT_WRITE(PS_ON_PIN, PS_ON_ASLEEP);
-    powersupply_on = false;
+    PSU_OFF();
   #endif
 
   #if ENABLED(ULTIPANEL)

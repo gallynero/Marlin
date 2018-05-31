@@ -195,7 +195,7 @@ static const pin_map_t pinMap[] = {
 || defined(__AVR_ATmega324__)\
 || defined(__AVR_ATmega16__)
 
-#if defined(VARIANT_MIGHTY)
+#ifdef VARIANT_MIGHTY
 // Mighty Layout
 static const pin_map_t pinMap[] = {
   {&DDRB, &PINB, &PORTB, 0},  // B0  0
@@ -639,7 +639,7 @@ class DigitalPin {
 
 //------------------------------------------------------------------------------
 /** Nop for timing. */
-#define nop asm volatile ("nop\n\t")
+#define nop __asm__ volatile ("nop")
 //------------------------------------------------------------------------------
 /** Pin Mode for MISO is input.*/
 const bool MISO_MODE  = false;

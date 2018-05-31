@@ -28,7 +28,7 @@ extern "C" {
 #include "cdc.h"
 #include "cdcuser.h"
 
-#include <HAL_LPC1768/serial.h>
+#include <serial.h>
 
 unsigned char BulkBufIn[USB_CDC_BUFSIZE];            // Buffer to store USB IN  packet
 unsigned char BulkBufOut[USB_CDC_BUFSIZE];            // Buffer to store USB OUT packet
@@ -38,7 +38,6 @@ CDC_LINE_CODING CDC_LineCoding = { 921600, 0, 0, 8 };
 unsigned short CDC_DepInEmpty = 1;                   // Data IN EP is empty
 unsigned short CDC_LineState = 0;
 unsigned short CDC_SerialState = 0;
-
 
 extern HalSerial usb_serial;
 /*----------------------------------------------------------------------------
@@ -52,6 +51,9 @@ uint32_t CDC_WrOutBuf(const char *buffer, uint32_t *length) {
   bytesWritten = bytesToWrite;
 
   while (bytesToWrite) {
+    #if ENABLED(EMERGENCY_PARSER)
+      emergency_parser.update(usb_serial.emergency_state, *buffer);
+    #endif
     usb_serial.receive_buffer.write(*buffer++);           // Copy Data to buffer
     bytesToWrite--;
   }

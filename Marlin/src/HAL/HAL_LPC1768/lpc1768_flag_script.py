@@ -1,3 +1,4 @@
+from __future__ import print_function
 import sys
 
 #dynamic build flags for generic compile options
@@ -8,26 +9,29 @@ if __name__ == "__main__":
                     "-mcpu=cortex-m3",
                     "-mthumb",
 
-                    "-ffreestanding",
                     "-fsigned-char",
                     "-fno-move-loop-invariants",
+                    "-fno-strict-aliasing",
+                    "-fsingle-precision-constant",
 
                     "--specs=nano.specs",
                     "--specs=nosys.specs",
 
-                    "-IMarlin/src/HAL",
+                    # For external libraries
                     "-IMarlin/src/HAL/HAL_LPC1768/include",
+
+                    # For MarlinFirmware/U8glib-HAL
+                    "-IMarlin/src/HAL/HAL_LPC1768/u8g",
 
                     "-MMD",
                     "-MP",
-                    "-DTARGET_LPC1768",
-                    "-DIS_REARM"
+                    "-DTARGET_LPC1768"
                   ])
 
   for i in range(1, len(sys.argv)):
     args += " " + sys.argv[i]
 
-  print args
+  print(args)
 
 # extra script for linker options
 else:

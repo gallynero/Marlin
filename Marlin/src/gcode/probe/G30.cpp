@@ -36,13 +36,13 @@
  *
  *   X   Probe X position (default current X)
  *   Y   Probe Y position (default current Y)
- *   S0  Leave the probe deployed
+ *   E   Engage the probe for each probe (default 1)
  */
 void GcodeSuite::G30() {
   const float xpos = parser.linearval('X', current_position[X_AXIS] + X_PROBE_OFFSET_FROM_EXTRUDER),
               ypos = parser.linearval('Y', current_position[Y_AXIS] + Y_PROBE_OFFSET_FROM_EXTRUDER);
 
-  if (!position_is_reachable_by_probe_xy(xpos, ypos)) return;
+  if (!position_is_reachable_by_probe(xpos, ypos)) return;
 
   // Disable leveling so the planner won't mess with us
   #if HAS_LEVELING
@@ -51,15 +51,20 @@ void GcodeSuite::G30() {
 
   setup_for_endstop_or_probe_move();
 
-  const float measured_z = probe_pt(xpos, ypos, parser.boolval('S', true), 1);
+  const ProbePtRaise raise_after = parser.boolval('E', true) ? PROBE_PT_STOW : PROBE_PT_NONE;
+  const float measured_z = probe_pt(xpos, ypos, raise_after, 1);
 
   if (!isnan(measured_z)) {
-    SERIAL_PROTOCOLPAIR("Bed X: ", FIXFLOAT(xpos));
-    SERIAL_PROTOCOLPAIR(" Y: ", FIXFLOAT(ypos));
-    SERIAL_PROTOCOLLNPAIR(" Z: ", FIXFLOAT(measured_z));
+    SERIAL_PROTOCOLPAIR_F("Bed X: ", xpos);
+    SERIAL_PROTOCOLPAIR_F(" Y: ", ypos);
+    SERIAL_PROTOCOLLNPAIR_F(" Z: ", measured_z);
   }
 
   clean_up_after_endstop_or_probe_move();
+
+  #ifdef Z_AFTER_PROBING
+    if (raise_after == PROBE_PT_STOW) move_z_after_probing();
+  #endif
 
   report_current_position();
 }
