@@ -25,6 +25,10 @@
 
 #include "../inc/MarlinConfig.h"
 
+#if ENABLED(EEPROM_SETTINGS)
+  #include "../HAL/shared/persistent_store_api.h"
+#endif
+
 #define ADD_PORT_ARG ENABLED(EEPROM_CHITCHAT) && NUM_SERIAL > 1
 
 #if ADD_PORT_ARG
@@ -63,8 +67,8 @@ class MarlinSettings {
 
       #if ENABLED(AUTO_BED_LEVELING_UBL) // Eventually make these available if any leveling system
                                          // That can store is enabled
-        static int16_t meshes_start_index();
-        FORCE_INLINE static int16_t meshes_end_index() { return meshes_end; }
+        static uint16_t meshes_start_index();
+        FORCE_INLINE static uint16_t meshes_end_index() { return meshes_end; }
         static uint16_t calc_num_meshes();
         static int mesh_slot_offset(const int8_t slot);
         static void store_mesh(const int8_t slot);
@@ -96,11 +100,10 @@ class MarlinSettings {
 
       static bool eeprom_error, validating;
 
-      #if ENABLED(AUTO_BED_LEVELING_UBL) // Eventually make these available if any leveling system
-                                         // That can store is enabled
-        static constexpr int16_t meshes_end = E2END - 128; // 128 is a placeholder for the size of the MAT; the MAT will always
-                                                           // live at the very end of the eeprom
-
+      #if ENABLED(AUTO_BED_LEVELING_UBL)  // Eventually make these available if any leveling system
+                                          // That can store is enabled
+        static const uint16_t meshes_end; // 128 is a placeholder for the size of the MAT; the MAT will always
+                                          // live at the very end of the eeprom
       #endif
 
       static bool _load(PORTINIT_SOLO);
